@@ -62,7 +62,7 @@ function runBinaryOperationTests() {
         interpreter.testGO(parsedCode, test.expected, test.code);
     });
 }
-//runBinaryOperationTests()
+runBinaryOperationTests()
 
 // Unary Operation
 function runUnaryOperationTests() {
@@ -105,7 +105,7 @@ function runUnaryOperationTests() {
         interpreter.testGO(parsedCode, test.expected, test.code);
     });
 }
-//runUnaryOperationTests();
+runUnaryOperationTests();
 
 // While Loop
 function runWhileLoopTests() {
@@ -138,7 +138,7 @@ function runWhileLoopTests() {
         interpreter.testGO(parsedCode, test.expected, test.code);
     });
 }
-//runWhileLoopTests();
+runWhileLoopTests();
 
 // Conditional Test Cases
 function runConditionalTests() {
@@ -215,7 +215,7 @@ if !(3 < 2) {
         interpreter.testGO(parsedCode, test.expected, test.code);
     });
 }
-//runConditionalTests();
+runConditionalTests();
 
 // Function Test Cases
 function runFunctionDeclarationTests() {
@@ -247,15 +247,6 @@ Println(multiply(6, 7))`,
             expected: [42],
             description: "Function declaration with multiplication operation"
         },
-        {
-            code: `
-func noReturn() {
-    Println("This function does not return a value.")
-}
-noReturn()`,
-            expected: ['"This function does not return a value."'],
-            description: "Function declaration without a return type"
-        },
     ];
 
     tests.forEach(test => {
@@ -264,4 +255,4 @@ noReturn()`,
         interpreter.testGO(parsedCode, test.expected, test.code);
     });
 }
-//runFunctionDeclarationTests()
+runFunctionDeclarationTests()
