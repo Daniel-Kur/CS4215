@@ -1,39 +1,48 @@
+// Class to isolate Channel
 class Channel {
-    constructor(bufferSize = 0) {
-        this.buffer = [];
-        this.bufferSize = bufferSize;
-        this.waitingSenders = [];
+    constructor(capacity = 1) {
+        this.capacity = capacity;
+        this.queue = [];
         this.waitingReceivers = [];
+        this.mutex = new Mutex();  // Assume Mutex is implemented similar to earlier example
     }
 
-    send(value) {
-        if (this.waitingReceivers.length > 0) {
-            const receiver = this.waitingReceivers.shift();
-            receiver(value);
-        } else {
-            if (this.buffer.length < this.bufferSize) {
-                this.buffer.push(value);
-            } else {
-                return new Promise(resolve => {
-                    this.waitingSenders.push(() => resolve(value));
-                });
+    async send(value) {
+        await this.mutex.lock();
+
+        if (this.queue.length < this.capacity) {
+            this.queue.push(value);
+            if (this.waitingReceivers.length > 0) {
+                const receiver = this.waitingReceivers.shift();
+                receiver(value);
             }
+            this.mutex.unlock();
+        } else {
+            // If the channel is full, we need to wait until a receiver has taken an item
+            await new Promise(resolve => {
+                const sender = () => {
+                    this.queue.push(value);
+                    this.mutex.unlock();
+                    resolve();
+                };
+                this.waitingReceivers.push(sender);
+            });
         }
     }
 
-    receive() {
-        if (this.buffer.length > 0) {
-            return Promise.resolve(this.buffer.shift());
+    async receive() {
+        await this.mutex.lock();
+
+        if (this.queue.length > 0) {
+            const value = this.queue.shift();
+            this.mutex.unlock();
+            return value;
         } else {
-            if (this.waitingSenders.length > 0) {
-                const sender = this.waitingSenders.shift();
-                sender();
-                return Promise.resolve(this.buffer.shift());
-            } else {
-                return new Promise(resolve => {
-                    this.waitingReceivers.push(resolve);
-                });
-            }
+            // If the channel is empty, wait for a value to be sent
+            return new Promise(resolve => {
+                this.waitingReceivers.push(resolve);
+                this.mutex.unlock();
+            });
         }
     }
 }

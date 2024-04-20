@@ -16,7 +16,7 @@ app.post("/parse", (req, res) => {
 
 app.post("/exec", (req, res) => {
     const parsed = parser.tokenize(req.body.key);
-    const ret = interpreter.execute(parsed)
+    const ret = interpreter.exec(parsed)
     if (ret === undefined) {
         res.json("undefined");
     } else {

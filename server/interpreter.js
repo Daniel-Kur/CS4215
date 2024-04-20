@@ -53,14 +53,18 @@ const binop_microcode = {
     '<=':  (x, y) => x <= y,
     '>=':  (x, y) => x >= y,
     '>':   (x, y) => x > y,
-    '===': (x, y) => x === y,
-    '!==': (x, y) => x !== y,
+    '==': (x, y) => x === y,
+    '!=': (x, y) => x !== y,
     '&&': (x, y) => x && y,
     '||': (x, y) => x || y,
 }
 
 // v2 is popped before v1
 const apply_binop = (op, v2, v1) => binop_microcode[op](v1, v2)
+
+function is_boolean(value) {
+    return typeof value === 'boolean';
+}
 
 const unop_microcode = {
     '-unary': x => - x,
@@ -85,93 +89,11 @@ function arity(x) {
 }
 
 const builtin_mapping = {
-
+  print: (x) => x
 }
-// const builtin_mapping = {
-//     display       : display,
-//     get_time      : get_time,
-//     stringify     : stringify,
-//     error         : error,
-//     prompt        : prompt,
-//     is_number     : is_number,
-//     is_string     : is_string,
-//     is_function   : x => typeof x === 'object' &&
-//                          (x.tag == 'builtin' ||
-//                           x.tag == 'closure'),
-//     is_boolean    : is_boolean,
-//     is_undefined  : is_undefined,
-//     parse_int     : parse_int,
-//     char_at       : char_at,
-//     arity         : x => typeof x === 'object' 
-//                          ? x.arity
-//                          : error(x, 'arity expects function, received:'),
-//     math_abs      : math_abs,
-//     math_acos     : math_acos,
-//     math_acosh    : math_acosh,
-//     math_asin     : math_asin,
-//     math_asinh    : math_asinh,
-//     math_atan     : math_atan,
-//     math_atanh    : math_atanh,
-//     math_atan2    : math_atan2,
-//     math_ceil     : math_ceil,
-//     math_cbrt     : math_cbrt,
-//     math_expm1    : math_expm1,
-//     math_clz32    : math_clz32,
-//     math_cos      : math_cos,
-//     math_cosh     : math_cosh,
-//     math_exp      : math_exp,
-//     math_floor    : math_floor,
-//     math_fround   : math_fround,
-//     math_hypot    : math_hypot,
-//     math_imul     : math_imul,
-//     math_log      : math_log,
-//     math_log1p    : math_log1p,
-//     math_log2     : math_log2,
-//     math_log10    : math_log10,
-//     math_max      : math_max,
-//     math_min      : math_min,
-//     math_pow      : math_pow,
-//     math_random   : math_random,
-//     math_round    : math_round,
-//     math_sign     : math_sign,
-//     math_sin      : math_sin,
-//     math_sinh     : math_sinh,
-//     math_sqrt     : math_sqrt,
-//     math_tanh     : math_tanh,
-//     math_trunc    : math_trunc,
-//     pair          : pair,
-//     is_pair       : is_pair,
-//     head          : head,
-//     tail          : tail,
-//     is_null       : is_null,
-//     set_head      : set_head,
-//     set_tail      : set_tail,
-//     array_length  : array_length,
-//     is_array      : is_array,
-//     list          : list,
-//     is_list       : is_list,
-//     display_list  : display_list,
-//     // from list libarary
-//     equal         : equal,
-//     length        : length,
-//     list_to_string: list_to_string,
-//     reverse       : reverse,
-//     append        : append,
-//     member        : member,
-//     remove        : remove,
-//     remove_all    : remove_all,
-//     enum_list     : enum_list,
-//     list_ref      : list_ref,
-//     // misc
-//     draw_data     : draw_data,
-//     parse         : parse,
-//     tokenize      : tokenize,
-//     apply_in_underlying_javascript: apply_in_underlying_javascript
-// }
 
 const apply_builtin = (builtin_symbol, args) =>{
-    console.log(args)
-    builtin_mapping[builtin_symbol](...args)
+    return builtin_mapping[builtin_symbol](...args)
 }
 
 /* ************
@@ -188,16 +110,7 @@ for (const key in builtin_mapping)
                           sym:   key, 
                           arity: arity(builtin_mapping[key])
                         }
-// fill global frame with built-in constants
-// global_frame.undefined    = undefined
-// global_frame.math_E       = math_E
-// global_frame.math_LN10    = math_LN10
-// global_frame.math_LN2     = math_LN2
-// global_frame.math_LOG10E  = math_LOG10E
-// global_frame.math_LOG2E   = math_LOG2E
-// global_frame.math_PI      = math_PI
-// global_frame.math_SQRT1_2 = math_SQRT1_2
-// global_frame.math_SQRT2   = math_SQRT2
+
 class Pair {
     constructor(first, second) {
         this.first = first;
@@ -373,6 +286,8 @@ function executeLockOperation(command, env) {
 // C: control: stack of commands
 // S: stash: stack of values
 // E: environment: list of frames
+// O: output: list of printed stmts
+// G: Go routines: list of go routines
 
 // control C
 
@@ -405,6 +320,14 @@ let S
 // environment E as the global environment.
 
 let E
+
+// Output Stack O
+let O
+
+// Contains all the value need to be shown
+
+// GO Routines states including C S E O
+let G
 
 /* *********************
  * interpreter microcode
@@ -452,10 +375,12 @@ const microcode = {
         cmd => 
         push(C, {tag: 'branch_i', cons: cmd.cons, alt: cmd.alt}, cmd.pred),
     app: 
-        cmd =>
+        cmd =>{
+            //console.log(cmd)
         push(C, {tag: 'app_i', arity: cmd.args.length}, 
                 ...cmd.args, // already in reverse order, see ast_to_json
-                cmd.fun),
+                cmd.fun)
+            },
     assmt: 
         cmd =>
         push(C, {tag: 'assmt_i', sym: cmd.sym}, cmd.expr),
@@ -568,7 +493,7 @@ const microcode = {
                 args[i] = S.pop()
             const sf = S.pop()
             if (sf.tag === 'builtin')
-                return push(S, apply_builtin(sf.sym, args))
+                return push(O, apply_builtin(sf.sym, args))
             // remaining case: sf.tag === 'closure'
             if (C.length === 0 || peek(C).tag === 'env_i') {   
                 // current E not needed:
@@ -847,11 +772,37 @@ const execute = (program) => {
     return S[0]
 }
 
+// Correct execution of GO
+const exec = (program) => {
+    C = [program]
+    S = []
+    E = global_environment
+    O = []
+    G = []
+    let i = 0
+    while (i < step_limit) {
+        if (C.length === 0) break
+        const cmd = C.pop()
+        if (microcode.hasOwnProperty(cmd.tag)) {
+            microcode[cmd.tag](cmd)
+            //debug(cmd)
+        } else {
+            console.log("", "unknown command: " + 
+                      command_to_string(cmd))
+        }
+        i++
+    }
+    if (i === step_limit) {
+        console.log("step limit " + stringify(step_limit) + " exceeded")
+    }
+    
+    return O
+}
 //Asycn Execution
 
 function executeGO(program) {
     //console.log(stringify(tokenize(program)));
-    C = [tokenize(program)]; // Initialize the control stack with the program
+    C = [program]; // Initialize the control stack with the program
     S = [];                  // Initialize an empty stash
     E = global_environment;  // Set the current environment to the global environment
 
@@ -923,6 +874,21 @@ Test case: ` + program + "\n")
     }
 }
 
+const testGO = (program, expected, input) => {
+    console.log("", `
+    
+****************
+Test case: ` + input + "\n")
+    const result = exec(program)
+    // Using JSON.stringify for deeper inspection
+    if (stringify(result) === stringify(expected)) {
+        console.log(result, "success:")
+    } else {
+        console.log(expected, "FAILURE! expected:")
+        console.log(result, "result:")
+    }
+}
+
 const testAsy = (program, expected) => {
     console.log("", `
     
@@ -944,4 +910,4 @@ Test case: ` + program + "\n")
     }
 }
 
-module.exports = {execute, executeGO, test};
+module.exports = {execute, executeGO, test, exec, testGO, testAsy};

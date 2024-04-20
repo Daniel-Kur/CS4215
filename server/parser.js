@@ -1,11 +1,12 @@
 const moo = require('moo');
 
 let lexer = moo.compile({
+    WS:        { match: /[ \t]+/, lineBreaks: false },  // Explicitly state no line breaks here
+    comment:   { match: /\/\/.*?$/, lineBreaks: true }, // Comments can contain line breaks
     NL:        { match: /\n/, lineBreaks: true },
-    WS:        /[ \t]+/,
-    comment:   /\/\/.*?$/,
     break:      "break",
     len:        "len",
+    print:      'Println',
     lbracket: '[',
     rbracket: ']',
     type: ['int', 'float', 'string', 'bool'],
@@ -20,6 +21,7 @@ let lexer = moo.compile({
     string:    /"(?:\\["\\]|[^\n"\\])*"/,
     boolean:   ['true', 'false'],
     identifier: /[a-zA-Z_][a-zA-Z0-9_]*/,
+    neq:        '!=',
     not:       '!',
     and:       '&&',
     or:        '||',
@@ -31,7 +33,7 @@ let lexer = moo.compile({
     assign:    ':=',
     lt:        '<',
     gt:        '>',
-    equals:    '===',
+    equals:    '==',
     lparen:    '(',
     rparen:    ')',
     lbrace:    '{',
@@ -55,7 +57,6 @@ function tokenize(input) {
         tag: "blk",
         body: parseTokens(tokens, 0).output[0]
     };
-
     return output;
 }
 
@@ -76,6 +77,30 @@ function parseTokens(tokens, startIndex) {
     while (i < tokens.length) {
         let token = tokens[i];
         switch (token.type) {
+            case "print":
+                if (tokens[i+1] && tokens[i+1].type === 'lparen') {
+                    i++;
+                    i++;
+                    let numLparen = 0;
+                    let args = "";
+                    while (tokens[i] && tokens[i].type !== 'rparen' || numLparen > 0) {
+                        if (tokens[i].type === 'lparen') numLparen++;
+                        if (tokens[i].type === 'rparen') numLparen--;
+                        args = args + tokens[i].value + " ";
+                        i++
+                    }
+                    let val = tokenize(args).body
+                    stmts.push({
+                        tag: 'app',
+                        fun: {
+                            tag: "nam",
+                            sym: "print"
+                        },
+                        args: [val]
+                    });
+                    i++; // Move past 'len', '(', identifier, and ')'
+                }
+                break
             case "break":
                 stmts.push({
                     tag: "break"
@@ -97,12 +122,7 @@ function parseTokens(tokens, startIndex) {
                 }
                 break
             case 'NL':
-                // New line might indicate the end of a statement
-                // if (stmts.length > 0) {
-                //     // If there are collected statements, push them as a sequence
-                //     output.push({tag: "seq", stmts: stmts});
-                //     stmts = []; // Reset for the next possible sequence
-                // }
+                //New line might indicate the end of a statement
                 i++;
                 break;
             case "go":
@@ -129,7 +149,7 @@ function parseTokens(tokens, startIndex) {
                 const exprResult = parseExpression(tokens, i + 1);
                 stmts.push({
                     tag: "ret",
-                    expr: exprResult.result.body
+                    expr: exprResult.result
                 });
                 i = exprResult.nextIndex; // move beyond the parsed expression
                 break;
@@ -150,7 +170,7 @@ function parseTokens(tokens, startIndex) {
                         i = arrayDeclResult.nextIndex; // Adjust after the array declaration
                     } else {
                         i += 2; // Skip 'assign' and to the expression
-                        const expressionResult = parseExpression(tokens, i);
+                        const expressionResult = parseExpressionLet(tokens, i);
                         stmts.push({
                             tag: 'let',
                             sym: token.value,
@@ -173,26 +193,37 @@ function parseTokens(tokens, startIndex) {
                 }
                 break;
             case 'not':
-                // Ensure unary operation parsing also correctly updates `i`
-                let operand = tokens[++i];
-                    stmts.push({
+                // Count the number of consecutive 'not' tokens
+                let notCount = 0;
+                while (tokens[i] && tokens[i].type === 'not') {
+                    notCount++;
+                    i++; // Move past each 'not'
+                }
+                // Parse the operand after all 'not' tokens
+                const operandResult = parseExpression(tokens, i);
+                let currentOperand = operandResult.result;
+                i = operandResult.nextIndex;
+            
+                // For each 'not', create a unary operation, wrapping the previous operation
+                for (let j = 0; j < notCount; j++) {
+                    currentOperand = {
                         tag: 'unop',
                         sym: '!',
-                        frst: { tag: 'lit', val: operand.value }
-                    });
-                i++;
+                        frst: currentOperand
+                    };
+                }
+            
+                // Push the final unary operation (or chain of operations) onto the statement stack
+                stmts.push(currentOperand);
                 break;
             default:
-                if (['plus', 'minus', 'mult', 'div', 'lt', 'gt', 'equals', 'and', 'or', 'mod'].includes(token.type)) {
+                if (['plus', 'minus', 'mult', 'div', 'lt', 'gt', 'equals', 'and', 'or', 'mod', 'neq'].includes(token.type)) {
                     let left = stmts.pop();
-                    i++; // Move to right operand
+                    if (tokens[i-1]){
+                        i--;
+                    }
                     const rightResult = parseExpression(tokens, i);
-                    stmts.push({
-                        tag: 'binop',
-                        sym: token.value,
-                        frst: left,
-                        scnd: rightResult.result.body
-                    });
+                    stmts.push(rightResult.result);
                     i = rightResult.nextIndex; // move beyond the parsed right expression
                 } else {
                     // Convert literals to their correct type
@@ -215,37 +246,58 @@ function parseTokens(tokens, startIndex) {
     return {output: output, nextIndex: i};
 }
 
+function parseExpressionLet(tokens, startIndex) {
+    let i = startIndex;
+    let expr = tokens[i].value + " ";
+    i++
+    return {
+        result: tokenize(expr), // Concatenating expressions for simplicity
+        nextIndex: i
+    };
+}
+
 function parseFunctionCall2(tokens, startIndex) {
     let i = startIndex;
     if (!tokens[i] || tokens[i].type !== 'identifier') {
         throw new Error("Expected function name at position " + i);
     }
+
     let functionName = tokens[i].value;
     i++; // Move past the function name
-
+    
     if (!tokens[i] || tokens[i].type !== 'lparen') {
         throw new Error("Expected '(' after function name at position " + i);
     }
     i++; // Move past '('
-
     const args = [];
-    while (i < tokens.length && tokens[i].type !== 'rparen') {
-        // Expecting an expression for each argument
-        const exprResult = parseExpression(tokens, i);
-        args.push(exprResult.result);
-        i = exprResult.nextIndex-1;
-
+    let argsStr = "";
+    let numLpar = 0;
+    while (i < tokens.length && tokens[i].type !== 'rparen' || numLpar > 0) {
         // If there's a comma, skip it and move to the next argument
-        if (tokens[i] && tokens[i].type === 'comma') {
+        if (tokens[i] && tokens[i].type === 'lparen') {
+            numLpar++;
+        }
+        if (tokens[i] && tokens[i].type === 'rparen') {
+            numLpar--;
+        }
+        if (tokens[i] && tokens[i].type === 'comma' && numLpar === 0) {
+            let item = tokenize(argsStr).body;
+            args.push(item);
+            argsStr = "";
             i++;
+        }else{
+            argsStr = argsStr + tokens[i].value + " ";
+            i++
         }
     }
-
+    if (argsStr !== "") {
+        let item2 = tokenize(argsStr).body;
+        args.push(item2);
+    }
     if (!tokens[i] || tokens[i].type !== 'rparen') {
         throw new Error("Expected ')' at the end of arguments list at position " + i);
     }
     i++; // Move past ')'
-
     return {
         result: {
             tag: "app",
@@ -298,10 +350,11 @@ function parseFunctionDeclaration(tokens, startIndex) {
 
     let type = "void"
     // type checking
-    if (tokens[i] || tokens[i].type === 'type') {
+    if (tokens[i].type === 'type') {
         type = tokens[i].value;
-    }
-    i++;
+        i++
+    } 
+
 
     if (!tokens[i] || tokens[i].type !== 'lbrace') {
         throw new Error("Expected '{' to start function body");
@@ -314,7 +367,7 @@ function parseFunctionDeclaration(tokens, startIndex) {
         body = body + tokens[i].value + " ";
         i++ ;
     }
-    const body2 = tokenize(body)
+    const body2 = tokenize(body).body
 
     return {
         result: {
@@ -363,7 +416,8 @@ function parseConditional(tokens, startIndex) {
                 i++;
             }
             if (i < tokens.length) i++; // Safely move past '}'
-            const elseExpr = parseTokens(elseCons, 0).output;
+            const elseExpr = parseTokens(elseCons, 0).output[0];
+            console.log(elseCons)
             alt = elseExpr;
         }
     }
@@ -441,16 +495,106 @@ function elemsReduction(tokens, startIndex) {
 }
 
 function parseExpression(tokens, startIndex) {
-    let expr = "";
+    const ops = [];
+    const values = [];
     let i = startIndex;
+    let previousToken = null;  // Track the previous token to determine context for unary operators
+
     while (i < tokens.length && tokens[i].type !== 'rbrace' && tokens[i].type !== 'NL') {
-        expr = expr + tokens[i].value + " ";
-        i++;
+        const token = tokens[i];
+        if (token.type === 'number' || token.type === 'identifier' || token.type === 'boolean') {
+            if (token.type === 'identifier') {
+                values.push({ tag: 'nam', sym: convertLiteral(token.value) });
+            } else {
+                values.push({ tag: 'lit', val: convertLiteral(token.value) });
+            }
+            i++;
+        } else if (token.value === '(') {
+            ops.push(token);
+            i++;
+        } else if (token.value === ')') {
+            while (ops.length > 0 && ops[ops.length - 1].value !== '(') {
+                processOperator(ops, values);
+            }
+            ops.pop();
+            i++;
+        } else if (isOperator(token.type)) {
+            while (ops.length > 0 && isOperator(ops[ops.length - 1].type) &&
+                   precedence(ops[ops.length - 1], token, previousToken) >= precedence(token)) {
+                processOperator(ops, values);
+            }
+            ops.push(token);
+            i++;
+        } else if (token.type === 'not') {
+            ops.push(token);
+            i++;
+        } else {
+            i++;
+        }
+        previousToken = token;  // Update the previous token
     }
+
+    while (ops.length > 0) {
+        processOperator(ops, values);
+    }
+
     return {
-        result: tokenize(expr), // Concatenating expressions for simplicity
+        result: values.pop(),
         nextIndex: i
     };
+}
+
+function isOperator(type) {
+    return ['plus', 'minus', 'mult', 'div', 'lt', 'gt', 'equals', 'and', 'or', 'mod', 'neq', 'not'].includes(type);
+}
+
+function precedence(token, previousToken = null) {
+    if (token.type === 'mult' || token.type === 'div' || token.type === 'mod') {
+        return 2;
+    } else if (token.type === 'plus' || token.type === 'minus') {
+        if (token.type === 'minus' && (!previousToken || previousToken.value === '(' || isOperator(previousToken.type))) {
+            return 3; // Higher precedence for unary minus
+        }
+        return 1;
+    } else if (token.type === 'not') {
+        return 3; // Higher precedence for unary not
+    } else {
+        return 0;
+    }
+}
+
+function processOperator(ops, values) {
+    const op = ops.pop();
+    if (op.type === 'not' || (op.type === 'minus' && values.length === 0)) {
+        const value = values.pop();
+        values.push({
+            tag: 'unop',
+            sym: op.type === 'not' ? '!' : '-unary',
+            frst: value
+        });
+    } else {
+        let tag = 'binop';
+        if (['and', 'or'].includes(op.type)) {
+            tag = 'log';
+        }
+        const right = values.pop();
+        const left = values.length > 0 ? values.pop() : { tag: 'lit', val: 0 };  // Default to 0 for unary minus
+        values.push({
+            tag: tag,
+            sym: op.value,
+            frst: left,
+            scnd: right
+        });
+    }
+}
+
+function convertLiteral(value) {
+    if (!isNaN(parseFloat(value)) && isFinite(value)) {
+        return parseFloat(value);
+    } else if (value === 'true' || value === 'false') {
+        return value === 'true';
+    }
+    return value;
 }
 
 function parseFor(tokens, startIndex) {
